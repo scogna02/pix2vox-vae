@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # Developed by Haozhe Xie <cshzxie@gmail.com>
+# Modified to implement VAE architecture
 
 import json
 import numpy as np
@@ -13,6 +14,7 @@ import utils.binvox_visualization
 import utils.data_loaders
 import utils.data_transforms
 import utils.network_utils
+from torch.utils.tensorboard import SummaryWriter
 
 from datetime import datetime as dt
 
@@ -21,6 +23,22 @@ from models.decoder import Decoder
 from models.refiner import Refiner
 from models.merger import Merger
 
+import numpy as np
+from PIL import Image
+
+def make_grid_image(image_list, grid_size=None):
+    if grid_size is None:
+        grid_size = int(np.ceil(np.sqrt(len(image_list))))
+    
+    h, w = image_list[0].shape[:2]
+    grid_img = Image.new('RGB', (grid_size * w, grid_size * h), color='white')
+    
+    for i, img in enumerate(image_list):
+        if isinstance(img, np.ndarray):
+            img = Image.fromarray(img)
+        grid_img.paste(img, box=(i % grid_size * w, i // grid_size * h))
+    
+    return np.array(grid_img)
 
 def test_net(cfg,
              epoch_idx=-1,
@@ -33,6 +51,12 @@ def test_net(cfg,
              merger=None):
     # Enable the inbuilt cudnn auto-tuner to find the best algorithm to use
     torch.backends.cudnn.benchmark = True
+    
+    # Set up TensorBoard writer
+    if test_writer is None:
+        output_dir = os.path.join(cfg.DIR.OUT_PATH, '%s', dt.now().isoformat())
+        log_dir = output_dir % 'images'
+        test_writer = SummaryWriter(log_dir)
 
     # Load taxonomies of dataset
     taxonomies = []
@@ -91,6 +115,7 @@ def test_net(cfg,
     n_samples = len(test_data_loader)
     test_iou = dict()
     encoder_losses = utils.network_utils.AverageMeter()
+    kl_divergences = utils.network_utils.AverageMeter()
     refiner_losses = utils.network_utils.AverageMeter()
 
     # Switch models to evaluation mode
@@ -98,7 +123,7 @@ def test_net(cfg,
     decoder.eval()
     refiner.eval()
     merger.eval()
-
+    
     for sample_idx, (taxonomy_id, sample_name, rendering_images, ground_truth_volume) in enumerate(test_data_loader):
         taxonomy_id = taxonomy_id[0] if isinstance(taxonomy_id[0], str) else taxonomy_id[0].item()
         sample_name = sample_name[0]
@@ -109,14 +134,18 @@ def test_net(cfg,
             ground_truth_volume = utils.network_utils.var_or_cuda(ground_truth_volume)
 
             # Test the encoder, decoder, refiner and merger
-            image_features = encoder(rendering_images)
-            raw_features, generated_volume = decoder(image_features)
+            mu, log_sigma, z = encoder(rendering_images)
+            raw_features, generated_volume = decoder(z)
 
             if cfg.NETWORK.USE_MERGER and epoch_idx >= cfg.TRAIN.EPOCH_START_USE_MERGER:
                 generated_volume = merger(raw_features, generated_volume)
             else:
                 generated_volume = torch.mean(generated_volume, dim=1)
-            encoder_loss = bce_loss(generated_volume, ground_truth_volume) * 10
+
+            # VAE loss: reconstruction + KL divergence
+            reconstruction_loss = bce_loss(generated_volume, ground_truth_volume) * 10
+            kl_divergence = -0.5 * torch.sum(1 + log_sigma - mu.pow(2) - log_sigma.exp())
+            encoder_loss = reconstruction_loss + kl_divergence
 
             if cfg.NETWORK.USE_REFINER and epoch_idx >= cfg.TRAIN.EPOCH_START_USE_REFINER:
                 generated_volume = refiner(generated_volume)
@@ -126,6 +155,7 @@ def test_net(cfg,
 
             # Append loss and accuracy to average metrics
             encoder_losses.update(encoder_loss.item())
+            kl_divergences.update(kl_divergence.item())
             refiner_losses.update(refiner_loss.item())
 
             # IoU per sample
@@ -146,7 +176,7 @@ def test_net(cfg,
             if output_dir and sample_idx < 3:
                 img_dir = output_dir % 'images'
                 # Volume Visualization
-                gv = generated_volume.cpu().numpy()
+                """gv = generated_volume.cpu().numpy()
                 rendering_views = utils.binvox_visualization.get_volume_views(gv, os.path.join(img_dir, 'test'),
                                                                               epoch_idx)
                 test_writer.add_image('Test Sample#%02d/Volume Reconstructed' % sample_idx, rendering_views, epoch_idx)
@@ -154,12 +184,12 @@ def test_net(cfg,
                 rendering_views = utils.binvox_visualization.get_volume_views(gtv, os.path.join(img_dir, 'test'),
                                                                               epoch_idx)
                 test_writer.add_image('Test Sample#%02d/Volume GroundTruth' % sample_idx, rendering_views, epoch_idx)
-
+"""
             # Print sample loss and IoU
-            print('[INFO] %s Test[%d/%d] Taxonomy = %s Sample = %s EDLoss = %.4f RLoss = %.4f IoU = %s' %
+            print('[INFO] %s Test[%d/%d] Taxonomy = %s Sample = %s EDLoss = %.4f KLDiv = %.4f RLoss = %.4f IoU = %s' %
                   (dt.now(), sample_idx + 1, n_samples, taxonomy_id, sample_name, encoder_loss.item(),
-                   refiner_loss.item(), ['%.4f' % si for si in sample_iou]))
-
+                   kl_divergence.item(), refiner_loss.item(), ['%.4f' % si for si in sample_iou]))
+    
     # Output testing results
     mean_iou = []
     for taxonomy_id in test_iou:
@@ -197,6 +227,7 @@ def test_net(cfg,
     max_iou = np.max(mean_iou)
     if test_writer is not None:
         test_writer.add_scalar('EncoderDecoder/EpochLoss', encoder_losses.avg, epoch_idx)
+        test_writer.add_scalar('EncoderDecoder/EpochKLDivergence', kl_divergences.avg, epoch_idx)
         test_writer.add_scalar('Refiner/EpochLoss', refiner_losses.avg, epoch_idx)
         test_writer.add_scalar('Refiner/IoU', max_iou, epoch_idx)
 
