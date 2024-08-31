@@ -82,18 +82,18 @@ class Decoder_or(torch.nn.Module):
             torch.nn.ReLU()
         )
         self.layer2 = torch.nn.Sequential(
-            torch.nn.ConvTranspose3d(512, 128, kernel_size=4, stride=2, bias=cfg.NETWORK.TCONV_USE_BIAS, padding=1),
-            torch.nn.BatchNorm3d(128),
+            torch.nn.ConvTranspose3d(512, 256, kernel_size=4, stride=2, bias=cfg.NETWORK.TCONV_USE_BIAS, padding=1),
+            torch.nn.BatchNorm3d(256),
             torch.nn.ReLU()
         )
         self.layer3 = torch.nn.Sequential(
-            torch.nn.ConvTranspose3d(128, 32, kernel_size=4, stride=2, bias=cfg.NETWORK.TCONV_USE_BIAS, padding=1),
-            torch.nn.BatchNorm3d(32),
+            torch.nn.ConvTranspose3d(256, 64, kernel_size=4, stride=2, bias=cfg.NETWORK.TCONV_USE_BIAS, padding=1),
+            torch.nn.BatchNorm3d(64),
             torch.nn.ReLU()
         )
         self.layer4 = torch.nn.Sequential(
-            torch.nn.ConvTranspose3d(32, 8, kernel_size=4, stride=2, bias=cfg.NETWORK.TCONV_USE_BIAS, padding=1),
-            torch.nn.BatchNorm3d(8),
+            torch.nn.ConvTranspose3d(64, 16, kernel_size=4, stride=2, bias=cfg.NETWORK.TCONV_USE_BIAS, padding=1),
+            torch.nn.BatchNorm3d(16),
             torch.nn.ReLU()
         )
         self.layer5 = torch.nn.Sequential(
