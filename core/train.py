@@ -131,6 +131,7 @@ def train_net(cfg):
 
     # Set up loss functions
     bce_loss = torch.nn.BCELoss()
+    mse_loss = torch.nn.MSELoss()
 
     # Load pretrained model if exists
     init_epoch = 0
@@ -199,9 +200,11 @@ def train_net(cfg):
                 generated_volumes = torch.mean(generated_volumes, dim=1)
 
             # VAE loss: reconstruction + KL divergence
-            reconstruction_loss = bce_loss(generated_volumes, ground_truth_volumes) * 10
-            kl_divergence = -0.5 * torch.sum(1 + log_sigma - mu.pow(2) - log_sigma.exp())
-            encoder_loss = reconstruction_loss + kl_divergence
+            reconstruction_loss = mse_loss(generated_volumes, ground_truth_volumes) * 10
+            #kl_divergence = -0.5 * torch.sum(1 + log_sigma - mu.pow(2) - log_sigma.exp())
+            kld_element = mu.pow(2).add_(log_sigma.exp()).mul_(-1).add_(1).add_(log_sigma)
+            kl_divergence = torch.sum(kld_element).mul_(-0.5)
+            encoder_loss = reconstruction_loss + kl_divergenc
 
             if cfg.NETWORK.USE_REFINER and epoch_idx >= cfg.TRAIN.EPOCH_START_USE_REFINER:
                 generated_volumes = refiner(generated_volumes)
