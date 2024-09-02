@@ -204,7 +204,7 @@ def train_net(cfg):
             #kl_divergence = -0.5 * torch.sum(1 + log_sigma - mu.pow(2) - log_sigma.exp())
             kld_element = mu.pow(2).add_(log_sigma.exp()).mul_(-1).add_(1).add_(log_sigma)
             kl_divergence = torch.sum(kld_element).mul_(-0.5)
-            encoder_loss = reconstruction_loss + kl_divergenc
+            encoder_loss = reconstruction_loss + kl_divergence
 
             if cfg.NETWORK.USE_REFINER and epoch_idx >= cfg.TRAIN.EPOCH_START_USE_REFINER:
                 generated_volumes = refiner(generated_volumes)
